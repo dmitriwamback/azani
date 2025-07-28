@@ -112,6 +112,8 @@ extension Renderer: MTKViewDelegate {
     
     func draw(in view: MTKView) {
         
+        cube.rotation.x += 0.01
+        
         let samplerDescriptor = MTLSamplerDescriptor()
         samplerDescriptor.minFilter = .linear
         samplerDescriptor.magFilter = .linear
@@ -140,12 +142,15 @@ extension Renderer: MTKViewDelegate {
         renderEncoder.setFragmentSamplerState(samplerState, index: 0)
         renderEncoder.setDepthStencilState(depthStencilState)
         renderEncoder.setRenderPipelineState(pipelineState)
-        renderEncoder.setVertexBuffer(gBufferQuad.vertexBuffer, offset: 0, index: 0)
-        renderEncoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
-        renderEncoder.setFragmentBuffer(uniformBuffer, offset: 0, index: 1)
-        renderEncoder.setFragmentTexture(gBufferPipeline.gAlbedo, index: 0)
-        renderEncoder.setFragmentTexture(gBufferPipeline.gNormal, index: 1)
-        renderEncoder.setFragmentTexture(gBufferPipeline.gPosition, index: 2)
+        renderEncoder.setVertexBuffer(gBufferQuad.vertexBuffer, offset: 0,  index: 0)
+        renderEncoder.setVertexBuffer(uniformBuffer, offset: 0,             index: 1)
+        renderEncoder.setFragmentBuffer(uniformBuffer, offset: 0,           index: 1)
+        renderEncoder.setFragmentTexture(gBufferPipeline.gAlbedo,           index: 0)
+        renderEncoder.setFragmentTexture(gBufferPipeline.gNormal,           index: 1)
+        renderEncoder.setFragmentTexture(gBufferPipeline.gPosition,         index: 2)
+        renderEncoder.setFragmentTexture(gBufferPipeline.gDepth,            index: 3)
+        renderEncoder.setFragmentTexture(gBufferPipeline.gBrightness,       index: 4)
+        renderEncoder.setFragmentTexture(gBufferPipeline.foregroundTexture, index: 5)
         
         //uniforms.model              = createModelMatrix(position: cube.position, scale: cube.scale, rotation: cube.rotation)
         uniforms.lookAt             = Renderer.camera.lookAtMatrix

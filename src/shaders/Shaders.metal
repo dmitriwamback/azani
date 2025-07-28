@@ -28,6 +28,7 @@ struct Uniforms {
     float4x4 model;
     float4x4 inverseProjection;
     float4x4 inverseLookAt;
+    float4x4 inverseModel;
     float3 cameraPosition;
     float3 color;
     float time;
@@ -45,6 +46,8 @@ struct GBufferOutFragment {
     float4 fragp [[color(0)]];
     float4 normal [[color(1)]];
     float4 albedo [[color(2)]];
+    float  depth [[color(3)]];
+    float4 brightness [[color(4)]];
 };
 
 vertex outVertex vmain(uint vertexID [[vertex_id]], constant inVertex *vertexArray [[buffer(0)]], constant Uniforms& uniforms [[buffer(1)]]) {
@@ -54,7 +57,7 @@ vertex outVertex vmain(uint vertexID [[vertex_id]], constant inVertex *vertexArr
     inVertex vert = vertexArray[vertexID];
 
     out.position    = float4(vert.position.xy, 0.0, 1.0);
-    out.normal      = vert.normal.xyz;
+    out.normal      = normalize(float3(transpose(uniforms.inverseModel) * float4(vert.normal.xyz, 1.0)));
     out.uv          = vert.uv;
     out.color       = uniforms.color;
     out.fragp       = float3(uniforms.model * float4(vert.position, 1.0));
@@ -62,12 +65,23 @@ vertex outVertex vmain(uint vertexID [[vertex_id]], constant inVertex *vertexArr
     return out;
 }
 
-fragment float4 fmain(outVertex in [[stage_in]], texture2d<float> albedo [[texture(0)]], texture2d<float> normal [[texture(1)]], texture2d<float> fragp [[texture(2)]], sampler inSampler [[sampler(0)]]) {
+fragment float4 fmain(outVertex in [[stage_in]],
+                      texture2d<float> albedo [[texture(0)]],
+                      texture2d<float> normal [[texture(1)]],
+                      texture2d<float> fragp [[texture(2)]],
+                      texture2d<float> depth [[texture(3)]],
+                      texture2d<float> brightness [[texture(4)]],
+                      texture2d<float> background [[texture(5)]],
+                      sampler inSampler [[sampler(0)]]) {
+    
+    float _depth = depth.sample(inSampler, float2(in.uv.x, 1 - in.uv.y)).r;
+    
+    if (_depth <= 0.001) return background.sample(inSampler, float2(in.uv.x, 1 - in.uv.y));
     
     float4 _albedo = albedo.sample(inSampler, float2(in.uv.x, 1 - in.uv.y));
     float4 _normal = normal.sample(inSampler, float2(in.uv.x, 1 - in.uv.y));
     float4 _fragp  = fragp.sample(inSampler, float2(in.uv.x, 1 - in.uv.y));
-    
+
     float3 lightPosition = float3(100.0);
     float3 ambient = _albedo.rgb * 0.4;
     
@@ -75,17 +89,19 @@ fragment float4 fmain(outVertex in [[stage_in]], texture2d<float> albedo [[textu
     float   diff            = max(dot(_normal.rgb, lightDirection), 0.0);
     float3  diffuse         = diff * float3(1.0);
     
-    return float4(_albedo.rgb * (ambient + diffuse), 1.0);
+    _albedo.rgb *= ambient + diffuse;
+    
+    return float4(_albedo.rgb, 1.0);
 }
 
 vertex GBufferOut vgBuffer(uint vertexID [[vertex_id]], constant inVertex *vertexArray [[buffer(0)]], constant Uniforms& uniforms [[buffer(1)]]) {
     inVertex vert = vertexArray[vertexID];
     GBufferOut out;
     
-    float4 fragp    = uniforms.lookAt * uniforms.model * float4(vert.position, 1.0);
-    out.position    = uniforms.projection * fragp;
+    float4 fragp    = uniforms.model * float4(vert.position, 1.0);
+    out.position    = uniforms.projection * uniforms.lookAt * uniforms.model * float4(vert.position, 1.0);
     out.fragp       = fragp.xyz;
-    out.normal      = vert.normal;
+    out.normal      = normalize(float3(transpose(uniforms.inverseModel) * float4(vert.normal, 1.0)));
     out.uv          = vert.uv;
     out.color       = uniforms.color;
     
@@ -93,9 +109,73 @@ vertex GBufferOut vgBuffer(uint vertexID [[vertex_id]], constant inVertex *verte
 }
 
 fragment GBufferOutFragment fgBuffer(GBufferOut in [[stage_in]]) {
+    
+    float near = 0.1;
+    float far = 1000.0;
+    
+    float linearDepth = -in.fragp.z;
+    float depth01 = (linearDepth - near) / (far - near);
+    
     GBufferOutFragment out;
     out.fragp   = float4(in.fragp, 1.0);
     out.normal  = float4(normalize(in.normal), 1.0);
     out.albedo  = float4(in.color, 1.0);
+    out.depth   = clamp(depth01 - 1e-5, 0.0, 1.0);
     return out;
+}
+
+
+constant float3 zenithColor  = float3(0.05, 0.15, 0.4);
+constant float3 horizonColor = float3(0.6, 0.7, 0.9);
+constant float3 groundColor  = float3(0.4, 0.35, 0.3);
+
+float3 computeRayDirection(float2 fragp, float4x4 inverseProjection, float4x4 inverseLookAt) {
+    
+    float2 uv = fragp * 2.0 - 1.0;
+    float4 clip = float4(uv, -1.0, 1.0);
+    float4 view = inverseProjection * clip;
+    view.z = -1.0;
+    view.w = 0;
+    float4 world = inverseLookAt * view;
+    return normalize(world.xyz);
+}
+
+kernel void background(constant Uniforms& uniforms [[buffer(0)]],
+                       texture2d<float, access::write> output [[texture(0)]],
+                       texture2d<float> albedo [[texture(1)]],
+                       texture2d<float> normal [[texture(2)]],
+                       texture2d<float> fragp [[texture(3)]],
+                       texture2d<float> depth [[texture(4)]],
+                       sampler inSampler [[sampler(0)]],
+                       uint2 gid [[thread_position_in_grid]]) {
+    
+    uint2 size = uint2(output.get_width(), output.get_height());
+            
+    if (gid.x >= size.x || gid.y >= size.y) {
+        return;
+    }
+    
+    float2 uv = float2(gid) / float2(size);
+    
+    float3 ray = computeRayDirection(float2(uv.x, 1 - uv.y), uniforms.inverseProjection, uniforms.inverseLookAt);
+    float y = ray.y;
+    
+    float3 skyColor;
+    
+    sampler depthSampler(filter::nearest, address::clamp_to_edge);
+    
+    float4 _albedo = float4(1.0);
+    
+    if (y > 0.0) {
+        float t = pow(y, 0.65);
+        skyColor = mix(horizonColor, zenithColor, t);
+    }
+    else {
+        float t = pow(-y, 0.7);
+        skyColor = mix(horizonColor, groundColor, t);
+    }
+    
+    _albedo = float4(skyColor, 1.0);
+    
+    output.write(_albedo, gid);
 }

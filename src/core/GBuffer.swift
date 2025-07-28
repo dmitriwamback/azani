@@ -29,17 +29,23 @@ class GBufferQuad {
 }
 
 class GBuffer {
-    var gPosition:              MTLTexture!
-    var gNormal:                MTLTexture!
-    var gAlbedo:                MTLTexture!
-    var depthTexture:           MTLTexture!
-    var brightness:             MTLTexture!
-    var gBufferPipelineState:   MTLRenderPipelineState!
+    var gPosition:                  MTLTexture!
+    var gNormal:                    MTLTexture!
+    var gAlbedo:                    MTLTexture!
+    var gDepth:                     MTLTexture!
+    var gBrightness:                MTLTexture!
+    var foregroundTexture:          MTLTexture!
+    
+    var depthTexture:               MTLTexture!
+    
+    var gBufferPipelineState:       MTLRenderPipelineState!
+    var backgroundPipelineState:    MTLComputePipelineState!
         
     init(vertexDescriptor: MTLVertexDescriptor, library: MTLLibrary?) {
         
-        let gBufferVertexFunction   = library?.makeFunction(name: "vgBuffer")
-        let gBufferFragmentFunction = library?.makeFunction(name: "fgBuffer")
+        let gBufferVertexFunction       = library?.makeFunction(name: "vgBuffer")
+        let gBufferFragmentFunction     = library?.makeFunction(name: "fgBuffer")
+        let backgroundKernelFunction    = library?.makeFunction(name: "background")
         
         let gBufferDescriptor = MTLRenderPipelineDescriptor()
         gBufferDescriptor.vertexFunction                    = gBufferVertexFunction
@@ -47,25 +53,38 @@ class GBuffer {
         gBufferDescriptor.colorAttachments[0].pixelFormat   = .rgba16Float
         gBufferDescriptor.colorAttachments[1].pixelFormat   = .rgba16Float
         gBufferDescriptor.colorAttachments[2].pixelFormat   = .rgba16Float
+        gBufferDescriptor.colorAttachments[3].pixelFormat   = .r32Float
         gBufferDescriptor.vertexDescriptor                  = vertexDescriptor
         gBufferDescriptor.depthAttachmentPixelFormat        = .depth32Float
         
         do {
             gBufferPipelineState = try Renderer.device.makeRenderPipelineState(descriptor: gBufferDescriptor)
+            backgroundPipelineState = try Renderer.device.makeComputePipelineState(function: backgroundKernelFunction!)
         }
         catch let error {
             fatalError(error.localizedDescription)
         }
         
         createGBufferTextures()
+        
+        let backgroundTextureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba8Unorm,
+            width: Int(Renderer.width),
+            height: Int(Renderer.height),
+            mipmapped: false
+        )
+        backgroundTextureDescriptor.usage = [.shaderWrite, .shaderRead]
+        
+        // -------------------------------------------------------------------------------- //
+        
+        foregroundTexture = Renderer.device.makeTexture(descriptor: backgroundTextureDescriptor)
     }
     
     func update(cube: Cube, commandBuffer: MTLCommandBuffer, depthStencilState: MTLDepthStencilState) {
         
         createGBufferTextures()
         
-        let descriptor = createGBufferRenderPassDescriptor()
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return }
+        
         
         var uniforms: UniformBuffer = UniformBuffer()
         
@@ -89,11 +108,30 @@ class GBuffer {
         }
         Renderer.camera.updateLookAt()
         
-        uniforms.model = cubeTransform
-        uniforms.lookAt = Renderer.camera.lookAtMatrix
-        uniforms.projection = Renderer.camera.projectionMatrix
+        uniforms.model                  = cubeTransform
+        uniforms.inverseModel           = cubeTransform.inverse
+        uniforms.lookAt                 = Renderer.camera.lookAtMatrix
+        uniforms.projection             = Renderer.camera.projectionMatrix
+        uniforms.inverseLookAt          = Renderer.camera.lookAtMatrix.inverse
+        uniforms.inverseProjection      = Renderer.camera.projectionMatrix.inverse
         
         let uniformBuffer: MTLBuffer = Renderer.device.makeBuffer(bytes: &uniforms, length: MemoryLayout<UniformBuffer>.stride, options: [])!
+        
+        memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<UniformBuffer>.stride)
+        
+        let descriptor = createGBufferRenderPassDescriptor()
+        
+        
+        let samplerDescriptor = MTLSamplerDescriptor()
+        samplerDescriptor.minFilter = .linear
+        samplerDescriptor.magFilter = .linear
+        samplerDescriptor.mipFilter = .linear
+        samplerDescriptor.sAddressMode = .clampToEdge
+        samplerDescriptor.tAddressMode = .clampToEdge
+
+        let samplerState = Renderer.device.makeSamplerState(descriptor: samplerDescriptor)
+        
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return }
 
         encoder.setRenderPipelineState(gBufferPipelineState)
         encoder.setDepthStencilState(depthStencilState)
@@ -101,11 +139,34 @@ class GBuffer {
         encoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
         encoder.setFragmentBuffer(uniformBuffer, offset: 0, index: 1)
 
-        memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<UniformBuffer>.stride)
-
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36)
 
         encoder.endEncoding()
+        
+        if let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
+                    
+            computeEncoder.setSamplerState(samplerState, index: 0)
+            
+            let threads = 16
+            
+            let threadsPerThreadgroup = MTLSizeMake(threads, threads, 1)
+            let threadgroups = MTLSizeMake(
+                (Int(foregroundTexture.width) + threads-1) / threads,
+                (Int(foregroundTexture.height) + threads-1) / threads,
+                1)
+            
+            computeEncoder.setComputePipelineState(backgroundPipelineState)
+            
+            computeEncoder.setTexture(foregroundTexture, index: 0)
+            computeEncoder.setTexture(gAlbedo,      index: 1)
+            computeEncoder.setTexture(gNormal,      index: 2)
+            computeEncoder.setTexture(gPosition,    index: 3)
+            computeEncoder.setTexture(gDepth,       index: 4)
+            computeEncoder.setBuffer(uniformBuffer, offset: 0, index: 0)
+            
+            computeEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerThreadgroup)
+            computeEncoder.endEncoding()
+        }
     }
     
     func createGBufferRenderPassDescriptor() -> MTLRenderPassDescriptor {
@@ -125,6 +186,11 @@ class GBuffer {
         descriptor.colorAttachments[2].loadAction = .clear
         descriptor.colorAttachments[2].storeAction = .store
         descriptor.colorAttachments[2].clearColor = MTLClearColorMake(0, 0, 0, 1)
+        
+        descriptor.colorAttachments[3].texture = gDepth
+        descriptor.colorAttachments[3].loadAction = .clear
+        descriptor.colorAttachments[3].storeAction = .store
+        descriptor.colorAttachments[3].clearColor = MTLClearColorMake(0, 0, 0, 1)
 
         descriptor.depthAttachment.texture = depthTexture
         descriptor.depthAttachment.loadAction = .clear
@@ -143,9 +209,9 @@ class GBuffer {
         )
         descriptor.usage = [.renderTarget, .shaderRead]
 
-        gPosition = Renderer.device.makeTexture(descriptor: descriptor)
-        gNormal = Renderer.device.makeTexture(descriptor: descriptor)
-        gAlbedo = Renderer.device.makeTexture(descriptor: descriptor)
+        gPosition   = Renderer.device.makeTexture(descriptor: descriptor)
+        gNormal     = Renderer.device.makeTexture(descriptor: descriptor)
+        gAlbedo     = Renderer.device.makeTexture(descriptor: descriptor)
 
         let depthDesc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .depth32Float,
@@ -153,7 +219,16 @@ class GBuffer {
             height: Int(Renderer.height),
             mipmapped: false
         )
-        depthDesc.usage = [.renderTarget]
+        depthDesc.usage = [.renderTarget, .shaderRead]
         depthTexture = Renderer.device.makeTexture(descriptor: depthDesc)
+        
+        let gDepthDesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r32Float,
+            width: Int(Renderer.width),
+            height: Int(Renderer.height),
+            mipmapped: false
+        )
+        gDepthDesc.usage = [.renderTarget, .shaderRead]
+        gDepth = Renderer.device.makeTexture(descriptor: gDepthDesc)
     }
 }

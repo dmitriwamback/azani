@@ -19,6 +19,7 @@ struct UniformBuffer {
     var model: simd_float4x4
     var inverseProjection: simd_float4x4
     var inverseLookAt: simd_float4x4
+    var inverseModel: simd_float4x4
     var cameraPosition: SIMD3<Float>
     var color: SIMD3<Float>
     var time: Float
@@ -32,6 +33,7 @@ struct UniformBuffer {
         self.cameraPosition         = cameraPosition
         self.color                  = color
         self.time                   = time
+        self.inverseModel           = simd_float4x4()
     }
     
     init() {
@@ -40,6 +42,7 @@ struct UniformBuffer {
         self.model                  = simd_float4x4()
         self.inverseProjection      = simd_float4x4()
         self.inverseLookAt          = simd_float4x4()
+        self.inverseModel           = simd_float4x4()
         self.cameraPosition         = SIMD3<Float>(0, 0, 0)
         self.color                  = SIMD3<Float>(0, 0, 0)
         self.time                   = 0

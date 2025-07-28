@@ -71,7 +71,7 @@ class Cube {
         
         position = SIMD3<Float>(0.0, 0.0, -5.0)
         rotation = SIMD3<Float>(25.0, 45.0, 0.0)
-        scale = SIMD3<Float>(5.5, 5.0, 5.0)
+        scale = SIMD3<Float>(0.15, 5.0, 5.0)
         color = SIMD3<Float>(0.8, 0.8, 0.8)
         
         vertexBuffer = Renderer.device.makeBuffer(bytes: vertices, length: MemoryLayout<inVertex>.stride * vertices.count, options: [])
