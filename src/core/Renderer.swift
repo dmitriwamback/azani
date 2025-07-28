@@ -26,6 +26,8 @@ class Renderer: NSObject {
     var pipelineState: MTLRenderPipelineState!
     var depthStencilState: MTLDepthStencilState!
     var cube: Cube!
+    var gBufferQuad: GBufferQuad!
+    var gBufferPipeline: GBuffer!
     
     init (metal: MTKView) {
         guard let device = MTLCreateSystemDefaultDevice() else {
@@ -96,6 +98,9 @@ class Renderer: NSObject {
         depthStencilDescriptor.isDepthWriteEnabled = true
         
         depthStencilState = Renderer.device.makeDepthStencilState(descriptor: depthStencilDescriptor)
+        gBufferPipeline = GBuffer(vertexDescriptor: vertexDescriptor, library: library)
+        
+        gBufferQuad = GBufferQuad()
     }
 }
 
@@ -107,10 +112,21 @@ extension Renderer: MTKViewDelegate {
     
     func draw(in view: MTKView) {
         
+        let samplerDescriptor = MTLSamplerDescriptor()
+        samplerDescriptor.minFilter = .linear
+        samplerDescriptor.magFilter = .linear
+        samplerDescriptor.mipFilter = .linear
+        samplerDescriptor.sAddressMode = .clampToEdge
+        samplerDescriptor.tAddressMode = .clampToEdge
+
+        let samplerState = Renderer.device.makeSamplerState(descriptor: samplerDescriptor)
+        
         Renderer.width = view.drawableSize.width
         Renderer.height = view.drawableSize.height
         
         guard let commandBuffer = Renderer.commandQueue.makeCommandBuffer() else { return }
+        
+        gBufferPipeline.update(cube: cube, commandBuffer: commandBuffer, depthStencilState: depthStencilState)
         
         guard let descriptor = view.currentRenderPassDescriptor else { return }
                 
@@ -120,35 +136,18 @@ extension Renderer: MTKViewDelegate {
         descriptor.depthAttachment.clearDepth = 1.0
         
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return }
-        renderEncoder.setDepthStencilState(depthStencilState)
         
+        renderEncoder.setFragmentSamplerState(samplerState, index: 0)
         renderEncoder.setDepthStencilState(depthStencilState)
         renderEncoder.setRenderPipelineState(pipelineState)
-        renderEncoder.setVertexBuffer(cube.vertexBuffer, offset: 0, index: 0)
+        renderEncoder.setVertexBuffer(gBufferQuad.vertexBuffer, offset: 0, index: 0)
         renderEncoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
         renderEncoder.setFragmentBuffer(uniformBuffer, offset: 0, index: 1)
+        renderEncoder.setFragmentTexture(gBufferPipeline.gAlbedo, index: 0)
+        renderEncoder.setFragmentTexture(gBufferPipeline.gNormal, index: 1)
+        renderEncoder.setFragmentTexture(gBufferPipeline.gPosition, index: 2)
         
-        let cameraTransform = createModelMatrix(position: Renderer.camera.position, scale: SIMD3<Float>(0.5, 0.5, 0.5), rotation: SIMD3<Float>(0.0, 0.0, 0.0))
-        let cubeTransform = createModelMatrix(position: cube.position, scale: cube.scale, rotation: cube.rotation)
-        let collision = GJK(colliderA: createColliderVertices(vertices: Renderer.camera.vertices, model: cameraTransform), colliderB: createColliderVertices(vertices: cube.vertices, model: cubeTransform))
-        
-        Renderer.camera.update()
-        Renderer.camera.position += Renderer.camera.velocity
-        
-        if collision.collided {
-            uniforms.color = SIMD3<Float>(0.8, 0.0, 0.0)
-            var correctedNormal = collision.normal
-            if simd_dot(correctedNormal, cube.position - Renderer.camera.position) > 0 {
-                correctedNormal = -correctedNormal
-            }
-            Renderer.camera.position += correctedNormal * collision.depth
-        }
-        else {
-            uniforms.color = cube.color
-        }
-        Renderer.camera.updateLookAt()
-        
-        uniforms.model              = createModelMatrix(position: cube.position, scale: cube.scale, rotation: cube.rotation)
+        //uniforms.model              = createModelMatrix(position: cube.position, scale: cube.scale, rotation: cube.rotation)
         uniforms.lookAt             = Renderer.camera.lookAtMatrix
         uniforms.projection         = Renderer.camera.projectionMatrix
         uniforms.inverseLookAt      = Renderer.camera.lookAtMatrix.inverse
@@ -157,7 +156,7 @@ extension Renderer: MTKViewDelegate {
         
         memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<UniformBuffer>.stride)
         
-        renderEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36)
+        renderEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
         
         renderEncoder.endEncoding()
         
