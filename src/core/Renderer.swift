@@ -107,15 +107,8 @@ extension Renderer: MTKViewDelegate {
     
     func draw(in view: MTKView) {
         
-        
-        let cameraTransform = createModelMatrix(position: Renderer.camera.position, scale: SIMD3<Float>(0.5, 0.5, 0.5), rotation: SIMD3<Float>(0.0, 0.0, 0.0))
-        let cubeTransform = createModelMatrix(position: cube.position, scale: cube.scale, rotation: cube.rotation)
-        
-        
         Renderer.width = view.drawableSize.width
         Renderer.height = view.drawableSize.height
-        
-        Renderer.camera.update()
         
         guard let commandBuffer = Renderer.commandQueue.makeCommandBuffer() else { return }
         
@@ -135,17 +128,32 @@ extension Renderer: MTKViewDelegate {
         renderEncoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
         renderEncoder.setFragmentBuffer(uniformBuffer, offset: 0, index: 1)
         
+        let cameraTransform = createModelMatrix(position: Renderer.camera.position, scale: SIMD3<Float>(0.5, 0.5, 0.5), rotation: SIMD3<Float>(0.0, 0.0, 0.0))
+        let cubeTransform = createModelMatrix(position: cube.position, scale: cube.scale, rotation: cube.rotation)
+        let collision = GJK(colliderA: createColliderVertices(vertices: Renderer.camera.vertices, model: cameraTransform), colliderB: createColliderVertices(vertices: cube.vertices, model: cubeTransform))
+        
+        Renderer.camera.update()
+        Renderer.camera.position += Renderer.camera.velocity
+        
+        if collision.collided {
+            uniforms.color = SIMD3<Float>(0.8, 0.0, 0.0)
+            var correctedNormal = collision.normal
+            if simd_dot(correctedNormal, cube.position - Renderer.camera.position) > 0 {
+                correctedNormal = -correctedNormal
+            }
+            Renderer.camera.position += correctedNormal * collision.depth
+        }
+        else {
+            uniforms.color = cube.color
+        }
+        Renderer.camera.updateLookAt()
+        
         uniforms.model              = createModelMatrix(position: cube.position, scale: cube.scale, rotation: cube.rotation)
         uniforms.lookAt             = Renderer.camera.lookAtMatrix
         uniforms.projection         = Renderer.camera.projectionMatrix
         uniforms.inverseLookAt      = Renderer.camera.lookAtMatrix.inverse
         uniforms.inverseProjection  = Renderer.camera.projectionMatrix.inverse
         uniforms.cameraPosition     = Renderer.camera.position
-        uniforms.color              = cube.color
-        
-        if GJK(colliderA: createColliderVertices(vertices: Renderer.camera.vertices, model: cameraTransform), colliderB: createColliderVertices(vertices: cube.vertices, model: cubeTransform)) {
-            uniforms.color = SIMD3<Float>(0.8, 0.0, 0.0)
-        }
         
         memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<UniformBuffer>.stride)
         
@@ -156,5 +164,7 @@ extension Renderer: MTKViewDelegate {
         guard let drawable = view.currentDrawable else { return }
         commandBuffer.present(drawable)
         commandBuffer.commit()
+        
+        Renderer.camera.velocity = .zero
     }
 }

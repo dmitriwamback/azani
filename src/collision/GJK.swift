@@ -141,29 +141,33 @@ func HandleSimplex(simplex: inout Simplex, direction: inout SIMD3<Float>) -> Boo
     }
 }
 
-func GJK(colliderA: [inVertex], colliderB: [inVertex]) -> Bool {
+func GJK(colliderA: [inVertex], colliderB: [inVertex]) -> Collision {
     
-    let _support = support(collider: colliderA, direction: SIMD3<Float>(1.0, 0.0, 0.0)) - support(collider: colliderB, direction: SIMD3<Float>(1.0, 0.0, 0.0))
+    var collision: Collision = Collision()
+    collision.collided = false
+    
+    let _support = support(collider: colliderA, direction: SIMD3<Float>(1.0, 0.0, 0.0)) - support(collider: colliderB, direction: SIMD3<Float>(-1.0, 0.0, 0.0))
     
     var simplex: Simplex = Simplex()
     simplex.pushFront(_support)
     
     var direction = -_support
     
-    for i in 0..<100 {
+    for _ in 0..<100 {
         let va = support(collider: colliderA, direction: direction)
         let vb = support(collider: colliderB, direction: -direction)
         let newSupport = va - vb
         
         if simd_dot(newSupport, direction) <= 0.0 {
-            return false
+            return collision
         }
         simplex.pushFront(newSupport)
         
         if HandleSimplex(simplex: &simplex, direction: &direction) {
-            return true
+            collision = EPA(simplex: simplex, colliderA: colliderA, colliderB: colliderB)
+            return collision
         }
     }
     
-    return false
+    return collision
 }

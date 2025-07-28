@@ -109,18 +109,25 @@ class Camera {
         let rightDirection = normalize(cross(motion, SIMD3<Float>(0, 1, 0)))
         velocity = (motion * (forward + backward)) + (rightDirection * (right + left))
         
-        position += velocity
-        
-        lookDirection = normalize(SIMD3<Float>(cos(yaw) * cos(pitch),
-                                               sin(pitch),
-                                               sin(yaw) * cos(pitch)))
-        
-        lookAtMatrix = createLookAtMatrix(eye: position, target: position + lookDirection, up: SIMD3<Float>(0, 1, 0))
-        
+        lookDirection = normalize(SIMD3<Float>(
+            cos(yaw) * cos(pitch),
+            sin(pitch),
+            sin(yaw) * cos(pitch)
+        ))
+                
         let width: CGFloat = Renderer.width
         let height: CGFloat = Renderer.height
-                
-        projectionMatrix = createProjectionMatrix(fov: 3.14159265358979/2.0, aspect: Float(width/height), far: 1000.0, near: 0.01)
+        
+        projectionMatrix = createProjectionMatrix(
+            fov: .pi / 2.0,
+            aspect: Float(width / height),
+            far: 1000.0,
+            near: 0.01
+        )
+    }
+    
+    func updateLookAt() {
+        lookAtMatrix = createLookAtMatrix(eye: position, target: position + lookDirection, up: SIMD3<Float>(0, 1, 0))
     }
     
     func updateRotation(mousePosition: NSPoint) {
