@@ -93,7 +93,6 @@ class GBuffer {
         let collision = GJK(colliderA: createColliderVertices(vertices: Renderer.camera.vertices, model: cameraTransform), colliderB: createColliderVertices(vertices: cube.vertices, model: cubeTransform))
         
         Renderer.camera.update()
-        Renderer.camera.position += Renderer.camera.velocity
         
         if collision.collided {
             uniforms.color = SIMD3<Float>(0.8, 0.0, 0.0)
@@ -114,6 +113,7 @@ class GBuffer {
         uniforms.projection             = Renderer.camera.projectionMatrix
         uniforms.inverseLookAt          = Renderer.camera.lookAtMatrix.inverse
         uniforms.inverseProjection      = Renderer.camera.projectionMatrix.inverse
+        uniforms.cameraPosition         = Renderer.camera.position
         
         let uniformBuffer: MTLBuffer = Renderer.device.makeBuffer(bytes: &uniforms, length: MemoryLayout<UniformBuffer>.stride, options: [])!
         

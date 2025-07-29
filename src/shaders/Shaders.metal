@@ -50,6 +50,28 @@ struct GBufferOutFragment {
     float4 brightness [[color(4)]];
 };
 
+constant float3 zenithColor  = float3(0.05, 0.15, 0.4);
+constant float3 horizonColor = float3(0.6, 0.7, 0.9);
+constant float3 groundColor  = float3(0.4, 0.35, 0.3);
+
+float3 getSkyColor(float y) {
+    
+    float3 skyColor;
+    
+    if (y > 0.0) {
+        float t = pow(y, 0.65);
+        skyColor = mix(horizonColor, zenithColor, t);
+    }
+    else {
+        float t = pow(-y, 0.7);
+        skyColor = mix(horizonColor, groundColor, t);
+    }
+    
+    return skyColor;
+}
+
+
+
 vertex outVertex vmain(uint vertexID [[vertex_id]], constant inVertex *vertexArray [[buffer(0)]], constant Uniforms& uniforms [[buffer(1)]]) {
     
     outVertex out;
@@ -66,21 +88,27 @@ vertex outVertex vmain(uint vertexID [[vertex_id]], constant inVertex *vertexArr
 }
 
 fragment float4 fmain(outVertex in [[stage_in]],
-                      texture2d<float> albedo [[texture(0)]],
-                      texture2d<float> normal [[texture(1)]],
-                      texture2d<float> fragp [[texture(2)]],
-                      texture2d<float> depth [[texture(3)]],
-                      texture2d<float> brightness [[texture(4)]],
-                      texture2d<float> background [[texture(5)]],
-                      sampler inSampler [[sampler(0)]]) {
+                      constant Uniforms& uniforms   [[buffer(1)]],
+                      texture2d<float> albedo       [[texture(0)]],
+                      texture2d<float> normal       [[texture(1)]],
+                      texture2d<float> fragp        [[texture(2)]],
+                      texture2d<float> depth        [[texture(3)]],
+                      texture2d<float> brightness   [[texture(4)]],
+                      texture2d<float> background   [[texture(5)]],
+                      sampler inSampler             [[sampler(0)]]) {
     
-    float _depth = depth.sample(inSampler, float2(in.uv.x, 1 - in.uv.y)).r;
+    float2 gUV = float2(in.uv.x, 1 - in.uv.y);
+    float _depth = depth.sample(inSampler, gUV).r;
+    float4 _albedo = float4(0.0);
     
-    if (_depth <= 0.001) return background.sample(inSampler, float2(in.uv.x, 1 - in.uv.y));
+    if (_depth <= 0.001) {
+        _albedo = background.sample(inSampler, gUV);
+        return float4(_albedo.rgb, 1.0);
+    }
     
-    float4 _albedo = albedo.sample(inSampler, float2(in.uv.x, 1 - in.uv.y));
-    float4 _normal = normal.sample(inSampler, float2(in.uv.x, 1 - in.uv.y));
-    float4 _fragp  = fragp.sample(inSampler, float2(in.uv.x, 1 - in.uv.y));
+    _albedo = albedo.sample(inSampler, gUV);
+    float4 _normal = normal.sample(inSampler, gUV);
+    float4 _fragp  = fragp.sample(inSampler, gUV);
 
     float3 lightPosition = float3(100.0);
     float3 ambient = _albedo.rgb * 0.4;
@@ -90,6 +118,16 @@ fragment float4 fmain(outVertex in [[stage_in]],
     float3  diffuse         = diff * float3(1.0);
     
     _albedo.rgb *= ambient + diffuse;
+    
+    
+    float3 viewDirection = normalize(uniforms.cameraPosition - _fragp.xyz);
+    float3 normalDirection = normalize(_normal.xyz);
+    float3 reflectDirection = normalize(reflect(-viewDirection, normalDirection));
+    
+    float3 skyColor = getSkyColor(reflectDirection.y);
+    
+    float reflectivity = 0.2;
+    _albedo.rgb = mix(_albedo.rgb, skyColor, reflectivity);
     
     return float4(_albedo.rgb, 1.0);
 }
@@ -125,9 +163,6 @@ fragment GBufferOutFragment fgBuffer(GBufferOut in [[stage_in]]) {
 }
 
 
-constant float3 zenithColor  = float3(0.05, 0.15, 0.4);
-constant float3 horizonColor = float3(0.6, 0.7, 0.9);
-constant float3 groundColor  = float3(0.4, 0.35, 0.3);
 
 float3 computeRayDirection(float2 fragp, float4x4 inverseProjection, float4x4 inverseLookAt) {
     
@@ -160,22 +195,7 @@ kernel void background(constant Uniforms& uniforms [[buffer(0)]],
     float3 ray = computeRayDirection(float2(uv.x, 1 - uv.y), uniforms.inverseProjection, uniforms.inverseLookAt);
     float y = ray.y;
     
-    float3 skyColor;
-    
-    sampler depthSampler(filter::nearest, address::clamp_to_edge);
-    
-    float4 _albedo = float4(1.0);
-    
-    if (y > 0.0) {
-        float t = pow(y, 0.65);
-        skyColor = mix(horizonColor, zenithColor, t);
-    }
-    else {
-        float t = pow(-y, 0.7);
-        skyColor = mix(horizonColor, groundColor, t);
-    }
-    
-    _albedo = float4(skyColor, 1.0);
+    float4 _albedo = float4(getSkyColor(y), 1.0);
     
     output.write(_albedo, gid);
 }

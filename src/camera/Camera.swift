@@ -109,6 +109,8 @@ class Camera {
         let rightDirection = normalize(cross(motion, SIMD3<Float>(0, 1, 0)))
         velocity = (motion * (forward + backward)) + (rightDirection * (right + left))
         
+        position += velocity
+        
         lookDirection = normalize(SIMD3<Float>(
             cos(yaw) * cos(pitch),
             sin(pitch),

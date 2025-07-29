@@ -112,7 +112,7 @@ extension Renderer: MTKViewDelegate {
     
     func draw(in view: MTKView) {
         
-        cube.rotation.x += 0.01
+        //cube.rotation.x += 0.01
         
         let samplerDescriptor = MTLSamplerDescriptor()
         samplerDescriptor.minFilter = .linear
