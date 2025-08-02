@@ -39,7 +39,7 @@ class Camera {
         lastMousePositionX = 0
         lastMousePositionY = 0
         
-        projectionMatrix = createProjectionMatrix(fov: 3.14159265358979/2.0, aspect: 1200/800, far: 1000.0, near: 0.1)
+        projectionMatrix = createProjectionMatrix(fov: 3.14159265358979/2.0, aspect: 1200/800, far: 1000.0, near: 0.01)
         lookAtMatrix = createLookAtMatrix(eye: position, target: position + lookDirection, up: SIMD3<Float>(0, 1, 0))
         
         pitch = 0

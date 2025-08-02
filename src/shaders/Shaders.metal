@@ -101,7 +101,7 @@ fragment float4 fmain(outVertex in [[stage_in]],
     float _depth = depth.sample(inSampler, gUV).r;
     float4 _albedo = float4(0.0);
     
-    if (_depth <= 0.001) {
+    if (_depth <= 0.0) {
         _albedo = background.sample(inSampler, gUV);
         return float4(_albedo.rgb, 1.0);
     }
@@ -126,7 +126,7 @@ fragment float4 fmain(outVertex in [[stage_in]],
     
     float3 skyColor = getSkyColor(reflectDirection.y);
     
-    float reflectivity = 0.2;
+    float reflectivity = 0.0;
     _albedo.rgb = mix(_albedo.rgb, skyColor, reflectivity);
     
     return float4(_albedo.rgb, 1.0);
@@ -146,18 +146,20 @@ vertex GBufferOut vgBuffer(uint vertexID [[vertex_id]], constant inVertex *verte
     return out;
 }
 
-fragment GBufferOutFragment fgBuffer(GBufferOut in [[stage_in]]) {
+fragment GBufferOutFragment fgBuffer(GBufferOut in [[stage_in]], constant Uniforms& uniforms [[buffer(1)]], texture2d<float> albedo [[texture(0)]], sampler inSampler [[sampler(0)]]) {
     
-    float near = 0.1;
+    float near = 0.01;
     float far = 1000.0;
     
-    float linearDepth = -in.fragp.z;
+    float linearDepth = length(uniforms.cameraPosition - in.fragp);
     float depth01 = (linearDepth - near) / (far - near);
+    
+    float2 gUV = float2(in.uv.x, 1 - in.uv.y);
     
     GBufferOutFragment out;
     out.fragp   = float4(in.fragp, 1.0);
     out.normal  = float4(normalize(in.normal), 1.0);
-    out.albedo  = float4(in.color, 1.0);
+    out.albedo  = albedo.sample(inSampler, gUV);
     out.depth   = clamp(depth01 - 1e-5, 0.0, 1.0);
     return out;
 }

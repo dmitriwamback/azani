@@ -26,6 +26,7 @@ class Renderer: NSObject {
     var pipelineState: MTLRenderPipelineState!
     var depthStencilState: MTLDepthStencilState!
     var cube: Cube!
+    var model: Model!
     var gBufferQuad: GBufferQuad!
     var gBufferPipeline: GBuffer!
     
@@ -61,6 +62,8 @@ class Renderer: NSObject {
         vertexDescriptor.attributes[2].bufferIndex = 0
 
         vertexDescriptor.layouts[0].stride = MemoryLayout<inVertex>.stride
+        
+        model = Model(url: Bundle.main.url(forResource: "Nova Scotia", withExtension: "obj")!, vertexDescriptor: vertexDescriptor)
         
         let library = device.makeDefaultLibrary()
         let vertexFunction = library?.makeFunction(name: "vmain")
@@ -128,7 +131,7 @@ extension Renderer: MTKViewDelegate {
         
         guard let commandBuffer = Renderer.commandQueue.makeCommandBuffer() else { return }
         
-        gBufferPipeline.update(cube: cube, commandBuffer: commandBuffer, depthStencilState: depthStencilState)
+        gBufferPipeline.update(model: model, commandBuffer: commandBuffer, depthStencilState: depthStencilState)
         
         guard let descriptor = view.currentRenderPassDescriptor else { return }
                 

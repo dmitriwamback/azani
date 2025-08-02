@@ -35,6 +35,7 @@ class GBuffer {
     var gDepth:                     MTLTexture!
     var gBrightness:                MTLTexture!
     var foregroundTexture:          MTLTexture!
+    var foregroundDepthTexture:     MTLTexture!
     
     var depthTexture:               MTLTexture!
     
@@ -77,10 +78,11 @@ class GBuffer {
         
         // -------------------------------------------------------------------------------- //
         
-        foregroundTexture = Renderer.device.makeTexture(descriptor: backgroundTextureDescriptor)
+        foregroundTexture       = Renderer.device.makeTexture(descriptor: backgroundTextureDescriptor)
+        foregroundDepthTexture  = Renderer.device.makeTexture(descriptor: backgroundTextureDescriptor)
     }
     
-    func update(cube: Cube, commandBuffer: MTLCommandBuffer, depthStencilState: MTLDepthStencilState) {
+    func update(model: Model, commandBuffer: MTLCommandBuffer, depthStencilState: MTLDepthStencilState) {
         
         createGBufferTextures()
         
@@ -89,11 +91,11 @@ class GBuffer {
         var uniforms: UniformBuffer = UniformBuffer()
         
         let cameraTransform = createModelMatrix(position: Renderer.camera.position, scale: SIMD3<Float>(0.5, 0.5, 0.5), rotation: SIMD3<Float>(0.0, 0.0, 0.0))
-        let cubeTransform = createModelMatrix(position: cube.position, scale: cube.scale, rotation: cube.rotation)
-        let collision = GJK(colliderA: createColliderVertices(vertices: Renderer.camera.vertices, model: cameraTransform), colliderB: createColliderVertices(vertices: cube.vertices, model: cubeTransform))
+        let cubeTransform = createModelMatrix(position: model.position, scale: model.scale, rotation: model.rotation)
+        //let collision = GJK(colliderA: createColliderVertices(vertices: Renderer.camera.vertices, model: cameraTransform), colliderB: createColliderVertices(vertices: cube.vertices, model: cubeTransform))
         
         Renderer.camera.update()
-        
+        /*
         if collision.collided {
             uniforms.color = SIMD3<Float>(0.8, 0.0, 0.0)
             var correctedNormal = collision.normal
@@ -105,6 +107,7 @@ class GBuffer {
         else {
             uniforms.color = cube.color
         }
+         */
         Renderer.camera.updateLookAt()
         
         uniforms.model                  = cubeTransform
@@ -135,11 +138,20 @@ class GBuffer {
 
         encoder.setRenderPipelineState(gBufferPipelineState)
         encoder.setDepthStencilState(depthStencilState)
-        encoder.setVertexBuffer(cube.vertexBuffer, offset: 0, index: 0)
+        //encoder.setVertexBuffer(cube.vertexBuffer, offset: 0, index: 0)
         encoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
         encoder.setFragmentBuffer(uniformBuffer, offset: 0, index: 1)
-
-        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36)
+        encoder.setFragmentSamplerState(samplerState, index: 0)
+        
+        for mesh in model.meshes {
+            let vertexBuffer = mesh.mesh.vertexBuffers[0]
+            encoder.setVertexBuffer(vertexBuffer.buffer, offset: vertexBuffer.offset, index: 0)
+            for (submesh, material) in zip(mesh.mesh.submeshes, mesh.materials) {
+                encoder.setFragmentTexture(material.albedoTexture, index: 0)
+                let indexBuffer = submesh.indexBuffer
+                encoder.drawIndexedPrimitives(type: .triangle, indexCount: submesh.indexCount, indexType: submesh.indexType, indexBuffer: indexBuffer.buffer, indexBufferOffset: 0)
+            }
+        }
 
         encoder.endEncoding()
         
@@ -157,11 +169,12 @@ class GBuffer {
             
             computeEncoder.setComputePipelineState(backgroundPipelineState)
             
-            computeEncoder.setTexture(foregroundTexture, index: 0)
-            computeEncoder.setTexture(gAlbedo,      index: 1)
-            computeEncoder.setTexture(gNormal,      index: 2)
-            computeEncoder.setTexture(gPosition,    index: 3)
-            computeEncoder.setTexture(gDepth,       index: 4)
+            computeEncoder.setTexture(foregroundTexture,        index: 0)
+            computeEncoder.setTexture(foregroundDepthTexture,   index: 1)
+            computeEncoder.setTexture(gAlbedo,      index: 2)
+            computeEncoder.setTexture(gNormal,      index: 3)
+            computeEncoder.setTexture(gPosition,    index: 4)
+            computeEncoder.setTexture(gDepth,       index: 5)
             computeEncoder.setBuffer(uniformBuffer, offset: 0, index: 0)
             
             computeEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerThreadgroup)

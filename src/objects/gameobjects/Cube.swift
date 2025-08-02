@@ -20,6 +20,7 @@ class Cube {
     var color:      SIMD3<Float>!
     
     init() {
+        
         vertices = [
             inVertex(position: SIMD3(-0.5, -0.5,  0.5), normal: SIMD3( 0,  0,  1), uv: SIMD2(0, 0)),
             inVertex(position: SIMD3( 0.5, -0.5,  0.5), normal: SIMD3( 0,  0,  1), uv: SIMD2(1, 0)),
